@@ -51,3 +51,9 @@ rsconnect/
 # R plot files
 *.pdf
 *.png
+
+# macOS files
+.DS_Store
+
+# Archived files
+Archive/
