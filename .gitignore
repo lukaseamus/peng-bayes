@@ -48,10 +48,6 @@ po/*~
 # RStudio Connect folder
 rsconnect/
 
-# R plot files
-*.pdf
-*.png
-
 # macOS files
 .DS_Store
 
