@@ -14,9 +14,15 @@ parameters{
   real<lower=0> beta_sigma;
   
   // Parameters
-  vector[n_species] alpha; // intercept
-  vector[n_species] beta; // slope
+  vector[n_species] alpha_z; // intercept z-score
+  vector[n_species] beta_z; // slope z-score
   real<lower=0> sigma; // likelihood sd
+}
+
+transformed parameters{
+  // Convert z-scores
+  vector[n_species] alpha = alpha_z * alpha_sigma + alpha_mu;
+  vector[n_species] beta = beta_z * beta_sigma + beta_mu;
 }
 
 model{
@@ -28,8 +34,8 @@ model{
   beta_sigma ~ normal( 0 , 1 )T[0,];
   
   // Priors
-  alpha ~ normal( alpha_mu , alpha_sigma );
-  beta ~ normal( beta_mu , beta_sigma );
+  alpha_z ~ normal( 0 , 1 ); // standard normal for z-scores
+  beta_z ~ normal( 0 , 1 );
   sigma ~ exponential( 1 );
       
   // Linear model

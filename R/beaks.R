@@ -363,7 +363,7 @@ beaks_plot <- (
       aes(beak_length, mu, colour = species)
     ) +
     geom_ribbon(
-      aes(beak_length, ymin = mu.lower, ymax = mu.upper,
+      aes(beak_length, ymin = beak_height.lower, ymax = beak_height.upper,
           fill = species, alpha = as_factor(.width))
     ) +
     scale_fill_manual(
@@ -436,3 +436,528 @@ beaks_contrasts_plot %>%
   )
 
 # 2. Pooled beaks ####
+# 2.1 Prior simulation ####
+require(extraDistr)
+
+tibble(
+  n = 1:1e3,
+  # Hyperpriors
+  alpha_mu = rnorm( 1e3 , 2 , 1 ), # intercept
+  alpha_sigma = rtnorm( 1e3 , 0 , 1, 0 ),
+  beta_mu = rnorm( 1e3 , 0 , 1 ), # slope
+  beta_sigma = rtnorm( 1e3 , 0 , 1, 0 ),
+  # Priors
+  sigma = rexp( 1e3 , 1 ) # likelihood sd
+) %>%
+  mutate(
+    # Priors depending on hyperpriors
+    alpha = rnorm( n() , alpha_mu , alpha_sigma ),
+    beta = rnorm( n() , beta_mu , beta_sigma )
+  ) %>%
+  expand_grid(
+    beak_length = penguins %>% drop_na(beak_length) %>%
+      mutate(beak_length = beak_length - mean(beak_length)) %$% 
+      seq( min(beak_length) , max(beak_length) , length.out = 50 )
+  ) %>%
+  mutate(
+    mu = alpha + beta * beak_length,
+    beak_height = rnorm( n() , mu , sigma )
+  ) %>%
+  pivot_longer(
+    cols = c(beak_height, mu),
+    names_to = "Parameter"
+  ) %>%
+  ggplot() +
+    geom_line(
+      aes(beak_length, value, group = n),
+      alpha = 0.05
+    ) +
+    facet_wrap(~ Parameter, scale = "free", nrow = 1) +
+    theme_classic()
+
+# 2.2 Stan model ####
+
+beaks_pooled_model <- here("Stan", "beaks_pooled.stan") %>%
+  read_file() %>%
+  write_stan_file() %>%
+  cmdstan_model() %T>%
+  print()
+
+beaks_pooled_samples <- beaks_pooled_model$sample(
+  data = penguins %>%
+    select(species, beak_length, beak_height) %>%
+    drop_na() %>%
+    mutate(beak_length = beak_length - mean(beak_length)) %>%
+    compose_data(),
+  chains = 8,
+  parallel_chains = parallel::detectCores(),
+  iter_warmup = 1e3,
+  iter_sampling = 1e3,
+) %T>%
+  print()
+
+# 2.3 Model checks ####
+
+# R-hat
+beaks_pooled_samples$summary() %>%
+  summarise(rhat_1.01 = mean( rhat > 1.01 ),
+            rhat_mean = mean( rhat ),
+            rhat_sd = sd( rhat ))
+# not great
+
+# Chains
+beaks_pooled_samples$draws(format = "df") %>%
+  mcmc_rank_overlay() +
+  guides(colour = guide_legend(nrow = 1)) +
+  labs(title = "Beaks pooled model",
+       y = "Frequency") +
+  coord_cartesian(xlim = c(0, 8e3), ylim = c(0, 100),
+                  expand = FALSE, clip = "off") +
+  theme_classic() +
+  theme(
+    legend.position = "top", 
+    legend.justification = 0,
+    panel.spacing = unit(1, "cm")
+  )
+
+# Pairs
+beaks_pooled_samples$draws(format = "df") %>%
+  mcmc_pairs(
+    pars = c(
+      "alpha_mu", "alpha_sigma",
+      "beta_mu", "beta_sigma",
+      "alpha[2]", "beta[2]",
+      "sigma"
+    ),
+    grid_args = list(top = "Beaks pooled model")
+  )
+# some funneling in hyperparameters
+
+# 2.4 Non-centred model ####
+
+beaks_pooled_nc_model <- here("Stan", "beaks_pooled_nc.stan") %>%
+  read_file() %>%
+  write_stan_file() %>%
+  cmdstan_model() %T>%
+  print()
+
+beaks_pooled_nc_samples <- beaks_pooled_nc_model$sample(
+  data = penguins %>%
+    select(species, beak_length, beak_height) %>%
+    drop_na() %>%
+    mutate(beak_length = beak_length - mean(beak_length)) %>%
+    compose_data(),
+  chains = 8,
+  parallel_chains = parallel::detectCores(),
+  iter_warmup = 1e3,
+  iter_sampling = 1e3,
+) %T>%
+  print()
+
+# 2.5 Model checks ####
+
+# R-hat
+beaks_pooled_nc_samples$summary() %>%
+  summarise(rhat_1.01 = mean( rhat > 1.01 ),
+            rhat_mean = mean( rhat ),
+            rhat_sd = sd( rhat ))
+# better
+
+# Chains
+beaks_pooled_nc_samples$draws(format = "df") %>%
+  mcmc_rank_overlay() +
+  guides(colour = guide_legend(nrow = 1)) +
+  labs(title = "Beaks pooled non-centred model",
+       y = "Frequency") +
+  coord_cartesian(xlim = c(0, 8e3), ylim = c(0, 100),
+                  expand = FALSE, clip = "off") +
+  theme_classic() +
+  theme(
+    legend.position = "top", 
+    legend.justification = 0,
+    panel.spacing = unit(1, "cm")
+  )
+# better mixing
+
+# Pairs
+beaks_pooled_nc_samples$draws(format = "df") %>%
+  mcmc_pairs(
+    pars = c(
+      "alpha_mu", "alpha_sigma",
+      "beta_mu", "beta_sigma",
+      "alpha_z[2]", "beta_z[2]",
+      "sigma"
+    ),
+    grid_args = list(top = "Beaks pooled non-centred model")
+  )
+# less funneling
+
+# 2.6 Prior-posterior comparison ####
+
+## Global
+# Prior
+beaks_pooled_prior_global <- tibble(
+  # Hyperpriors
+  alpha_mu = rnorm( 8e3 , 2 , 1 ), # intercept
+  alpha_sigma = rtnorm( 8e3 , 0 , 1, 0 ),
+  beta_mu = rnorm( 8e3 , 0 , 1 ), # slope
+  beta_sigma = rtnorm( 8e3 , 0 , 1, 0 ),
+  # Priors
+  sigma = rexp( 8e3 , 1 ) # likelihood sd
+) %>%
+  mutate(
+    # Priors depending on hyperpriors
+    alpha = rnorm( n() , alpha_mu , alpha_sigma ),
+    beta = rnorm( n() , beta_mu , beta_sigma )
+  ) %T>%
+  print()
+  
+# Posterior
+beaks_pooled_posterior_global <- beaks_pooled_nc_samples %>%
+  spread_draws(
+    alpha_mu, alpha_sigma, 
+    beta_mu, beta_sigma,
+    sigma
+  ) %>%
+  mutate(
+    # Predict for unobserved penguin species
+    alpha = rnorm( n() , alpha_mu , alpha_sigma ),
+    beta = rnorm( n() , beta_mu , beta_sigma )
+  ) %T>%
+  print()
+
+# Join
+beaks_pooled_prior_posterior_global <- bind_rows(
+    Prior = beaks_pooled_prior_global,
+    Posterior = beaks_pooled_posterior_global %>% 
+      select(-starts_with(".")),
+    .id = "Distribution"
+  ) %T>%
+  print()
+
+# Visualise
+beaks_pooled_prior_posterior_global %>%
+  pivot_longer(
+    cols = -Distribution,
+    names_to = "Parameter"
+  ) %>%
+  ggplot() +
+    geom_density(
+      aes(value, alpha = Distribution),
+      colour = NA, fill = "black"
+    ) +
+    scale_alpha_manual(values = c("Prior" = 0.2, "Posterior" = 0.6)) +
+    facet_wrap(~ Parameter, scales = "free") +
+    theme_classic()
+
+## Species
+# Prior
+beaks_pooled_prior_species <- beaks_pooled_prior_global %>%
+  select(alpha, beta, sigma) %>%
+  expand_grid(
+    species = penguins %$% 
+      levels(species) %>%
+      fct()
+  ) %T>%
+  print()
+
+# Posterior
+beaks_pooled_posterior_species <- beaks_pooled_nc_samples %>%
+  recover_types(penguins) %>%
+  spread_draws(alpha[species], beta[species], sigma) %T>%
+  print()
+
+# Join
+beaks_pooled_prior_posterior_species <- bind_rows(
+    Prior = beaks_pooled_prior_species,
+    Posterior = beaks_pooled_posterior_species %>% 
+      select(-starts_with(".")),
+    .id = "Distribution"
+  ) %T>%
+  print()
+
+# Visualise
+beaks_pooled_prior_posterior_species %>%
+  pivot_longer(
+    cols = -c(Distribution, species),
+    names_to = "Parameter"
+  ) %>%
+  ggplot() +
+    geom_density(
+      aes(value, alpha = Distribution),
+      colour = NA, fill = "black"
+    ) +
+    scale_alpha_manual(values = c("Prior" = 0.2, "Posterior" = 0.6)) +
+    facet_wrap(~ Parameter + species, scales = "free") +
+    theme_classic()
+
+# 2.7 Summary ####
+
+beaks_pooled_parameters <- beaks_pooled_prior_posterior_global %>%
+  mutate(
+    species = if_else(
+      Distribution == "Prior", "Prior", "Global"
+    ) %>% fct()
+  ) %>%
+  select(species, alpha, beta, sigma) %>%
+  bind_rows(
+    beaks_pooled_posterior_species %>% # species priors are already captured
+      select(-starts_with("."))
+  ) %T>%
+  print()
+  
+beaks_pooled_summary <- beaks_pooled_parameters %>%
+  select(-sigma) %>%
+  pivot_longer(
+    cols = -species,
+    names_to = "Parameter"
+  ) %>%
+  summarise(
+    across(
+      value,
+      list(
+        Mean = mean,
+        SD = sd,
+        Median = median
+      ),
+      .names = "{.fn}"
+    ),
+    P = mean( value > 0 ),
+    N = n(),
+    .by = c(species, Parameter)
+  ) %T>%
+  print()
+
+# 2.8 Contrasts ####
+
+beaks_pooled_contrasts <- beaks_pooled_parameters %>%
+  filter(!species %in% c("Prior", "Global")) %>%
+  droplevels() %>%
+  select(-sigma) %>%
+  pivot_longer(
+    cols = -species,
+    names_to = "Parameter"
+  ) %>%
+  mutate(n = 1:n(), .by = species) %>% # needed to identify rows
+  pivot_wider(
+    names_from = species,
+    values_from = value
+  ) %>%
+  mutate(
+    AC_Difference = Adelie - Chinstrap,
+    AC_Proportion = Adelie / Chinstrap,
+    AG_Difference = Adelie - Gentoo,
+    AG_Proportion = Adelie / Gentoo,
+    CG_Difference = Chinstrap - Gentoo,
+    CG_Proportion = Chinstrap / Gentoo
+  ) %>%
+  select(Parameter, ends_with("Difference"), ends_with("Proportion")) %>%
+  pivot_longer(
+    cols = -Parameter,
+    names_to = c("Contrast", "Statistic"),
+    names_sep = "_"
+  ) %T>%
+  print()
+
+
+beaks_pooled_contrasts_summary <- beaks_pooled_contrasts %>%
+  summarise(
+    across(
+      value,
+      list(
+        Mean = mean,
+        SD = sd,
+        Median = median
+      ),
+      .names = "{.fn}"
+    ),
+    P = max( mean( value > 0 ) , mean( value < 0 ) ),
+    N = n(),
+    .by = c(Parameter, Contrast, Statistic)
+  ) %T>%
+  print()
+
+# 2.9 Prediction ####
+
+beaks_pooled_prediction <- beaks_pooled_parameters %>%
+  full_join(
+    penguins %>%
+      drop_na(beak_length) %>%
+      mutate(beak_length = beak_length - mean(beak_length)) %>%
+      group_by(species) %>%
+      summarise(
+        min = min(beak_length),
+        max = max(beak_length)
+      ),
+    by = "species"
+  ) %>%
+  mutate(
+    min = if_else(
+      is.na(min),
+      penguins %$% 
+        ( min(beak_length, na.rm = T) - mean(beak_length, na.rm = T) ),
+      min
+    ),
+    max = if_else(
+      is.na(max),
+      penguins %$% 
+        ( max(beak_length, na.rm = T) - mean(beak_length, na.rm = T) ),
+      max
+    )
+  ) %>%
+  rowwise() %>%
+  mutate(beak_length = list( seq(min, max, length.out = 50) )) %>%
+  select(-c(min, max)) %>%
+  unnest(beak_length) %>%
+  mutate(
+    mu = alpha + beta * beak_length,
+    beak_height = rnorm( n() , mu , sigma )
+  ) %T>%
+  print()
+
+beaks_pooled_prediction_summary <- beaks_pooled_prediction %>%
+  group_by(species, beak_length) %>%
+  mean_qi(mu, beak_height, .width = c(.5, .8, .9)) %T>%
+  print()
+
+
+# 1.9 Visualisation ####
+
+beaks_pooled_plot <- (
+  beaks_pooled_prediction_summary %>%
+  filter(species != "Prior") %>%
+  droplevels() %>%
+  mutate( # undo centring
+    beak_length = beak_length + penguins %$% mean(beak_length, na.rm = T)
+  ) %>%
+  ggplot() +
+    geom_line(
+      aes(beak_length, mu, colour = species)
+    ) +
+    geom_ribbon(
+      aes(beak_length, ymin = mu.lower, ymax = mu.upper,
+          fill = species, alpha = as_factor(.width))
+    ) +
+    geom_point(
+      data = penguins %>% 
+        drop_na(species, beak_length, beak_height),
+      aes(beak_length, beak_height, colour = species),
+      alpha = 0.5, shape = 16, size = 2
+    ) +
+    scale_fill_manual(
+      values = c(
+        "Global" = "darkgrey",
+        "Adelie" = "darkorange",
+        "Chinstrap" = "purple",
+        "Gentoo" = "cyan4"
+      ),
+      guide = "none"
+    ) +
+    scale_colour_manual(
+      values = c(
+        "Global" = "darkgrey",
+        "Adelie" = "darkorange",
+        "Chinstrap" = "purple",
+        "Gentoo" = "cyan4"
+      ),
+      guide = "none"
+    ) +
+    scale_alpha_manual(
+      values = c("0.5" = 0.5, "0.8" = 0.4, "0.9" = 0.3),
+      guide = "none"
+    ) +
+    labs(x = "Beak length (cm)", y = "Beak height (cm)") +
+    coord_cartesian(xlim = c(3, 6), ylim = c(1, 2.5), expand = F) +
+    theme_classic()
+  ) %>%
+  ggdraw() +
+  draw_image(
+    here("Images", "penguins.png"), 
+    x = 0, y = 0.65, 
+    width = 0.6, height = 0.6*1074/1800
+  )
+
+beaks_pooled_plot
+
+beaks_pooled_plot %>%
+  ggsave(
+    filename = "beaks_pooled.pdf", 
+    path = "Plots",
+    device = cairo_pdf,
+    height = 6, width = 10, units = "cm"
+  )
+
+beaks_pooled_alpha_plot <- beaks_pooled_parameters %>%
+  filter(species != "Prior") %>%
+  droplevels() %>%
+  ggplot() +
+    stat_slab(
+      aes(alpha, species, fill = species),
+      colour = NA
+    ) +
+    scale_fill_manual(
+      values = c(
+        "Global" = "darkgrey",
+        "Adelie" = "darkorange",
+        "Chinstrap" = "purple",
+        "Gentoo" = "cyan4"
+      ),
+      guide = "none"
+    ) +
+    labs(x = "Beak height at mean beak length (cm)") +
+    coord_cartesian(xlim = c(0, 3), expand = c(T, F)) +
+    theme_classic() +
+    theme(
+      axis.title.y = element_blank(),
+      axis.ticks.y = element_blank(),
+      axis.line.y = element_blank()
+    )
+
+beaks_pooled_alpha_plot
+
+beaks_pooled_alpha_plot %>%
+  ggsave(
+    filename = "beaks_pooled_alpha.pdf", 
+    path = "Plots",
+    device = cairo_pdf,
+    height = 6, width = 10, units = "cm"
+  )
+
+
+beaks_pooled_beta_plot <- beaks_pooled_parameters %>%
+  filter(species != "Prior") %>%
+  droplevels() %>%
+  ggplot() +
+    stat_slab(
+      aes(beta, species, fill = species),
+      colour = NA, n = 2^10
+    ) +
+    scale_fill_manual(
+      values = c(
+        "Global" = "darkgrey",
+        "Adelie" = "darkorange",
+        "Chinstrap" = "purple",
+        "Gentoo" = "cyan4"
+      ),
+      guide = "none"
+    ) +
+    scale_x_continuous(breaks = seq(-0.2, 0.6, 0.2)) +
+    geom_vline(xintercept = 0) +
+    labs(x = "Height–length slope (cm per cm)") +
+    coord_cartesian(xlim = c(-0.2, 0.6), expand = c(T, F)) +
+    theme_classic() +
+    theme(
+      axis.title.y = element_blank(),
+      axis.ticks.y = element_blank(),
+      axis.line.y = element_blank()
+    )
+
+beaks_pooled_beta_plot
+
+beaks_pooled_beta_plot %>%
+  ggsave(
+    filename = "beaks_pooled_beta.pdf", 
+    path = "Plots",
+    device = cairo_pdf,
+    height = 6, width = 10, units = "cm"
+  )
