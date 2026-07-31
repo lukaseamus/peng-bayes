@@ -7,7 +7,7 @@ data{
 }
 
 parameters{
-  vector<lower=0>[n_species] alpha; // constant
+  vector<lower=0>[n_species] alpha; // coefficient
   vector<lower=1>[n_species] beta; // exponent
   real<lower=0> sigma; // likelihood sd
 }

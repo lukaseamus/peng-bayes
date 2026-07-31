@@ -226,7 +226,7 @@ beaks_prior_posterior %>%
     facet_wrap(~ Parameter + species, scales = "free") +
     theme_classic()
 
-# 1.7 Summary ####
+# 1.6 Summary ####
 
 beaks_parameters <- beaks_prior_posterior %>%
   filter(
@@ -264,7 +264,7 @@ beaks_summary <- beaks_parameters %>%
   ) %T>%
   print()
 
-# 1.8 Contrasts ####
+# 1.7 Contrasts ####
 
 beaks_contrasts <- beaks_parameters %>%
   filter(species != "Prior") %>%
@@ -313,7 +313,7 @@ beaks_contrasts_summary <- beaks_contrasts %>%
   ) %T>%
   print()
 
-# 1.6 Prediction ####
+# 1.8 Prediction ####
 
 beaks_prediction <- beaks_prior_posterior %>%
   filter(Distribution == "Posterior") %>%
