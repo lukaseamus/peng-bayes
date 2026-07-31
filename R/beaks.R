@@ -443,7 +443,7 @@ tibble(
   n = 1:1e3,
   # Hyperpriors
   alpha_mu = rnorm( 1e3 , 2 , 1 ), # intercept
-  alpha_sigma = rtnorm( 1e3 , 0 , 1, 0 ),
+  alpha_sigma = rtnorm( 1e3 , 0 , 1 , 0 ),
   beta_mu = rnorm( 1e3 , 0 , 1 ), # slope
   beta_sigma = rtnorm( 1e3 , 0 , 1, 0 ),
   # Priors
@@ -585,7 +585,7 @@ beaks_pooled_nc_samples$draws(format = "df") %>%
     pars = c(
       "alpha_mu", "alpha_sigma",
       "beta_mu", "beta_sigma",
-      "alpha_z[2]", "beta_z[2]",
+      "alpha[2]", "beta[2]",
       "sigma"
     ),
     grid_args = list(top = "Beaks pooled non-centred model")
@@ -821,7 +821,7 @@ beaks_pooled_prediction_summary <- beaks_pooled_prediction %>%
   print()
 
 
-# 1.9 Visualisation ####
+# 2.10 Visualisation ####
 
 beaks_pooled_plot <- (
   beaks_pooled_prediction_summary %>%

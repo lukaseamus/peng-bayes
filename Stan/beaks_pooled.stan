@@ -31,7 +31,7 @@ model{
   alpha ~ normal( alpha_mu , alpha_sigma );
   beta ~ normal( beta_mu , beta_sigma );
   sigma ~ exponential( 1 );
-      
+  
   // Linear model
   vector[n] mu = alpha[species] + beta[species] .* beak_length;
 
