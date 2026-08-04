@@ -412,7 +412,7 @@ mass_alpha_plot <- mass_parameters %>%
       ),
       guide = "none"
     ) +
-    labs(x = expression("Density coefficient (g per cm"^alpha*")")) +
+    labs(x = expression("Density coefficient (g per cm"^beta*")")) +
     coord_cartesian(xlim = c(0, 5), expand = c(T, F)) +
     theme_classic() +
     theme(
